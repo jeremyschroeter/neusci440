@@ -33,7 +33,7 @@ class LabChartDataset:
         if os.path.exists(file_path) is False:
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), file_path)
         
-        self.matlab_dict = loadmat(filename=file_path)
+        self.matlab_dict = loadmat(file_name=file_path)
         self.n_channels = len(self.matlab_dict['titles'])
         
         self.data = {f'Channel {ch + 1}' : self._split_blocks(ch) for ch in range(self.n_channels)}
@@ -46,7 +46,7 @@ class LabChartDataset:
 
         # LabChart concatenates channels for some reason so this is a workaround
         raw = self.matlab_dict['data'].reshape(-1)
-        channel_starts = self.matlab_dict['datastarts'][channel] - 1
+        channel_starts = self.matlab_dict['datastart'][channel] - 1
         channel_ends = self.matlab_dict['dataend'][channel]
 
         n_blocks = channel_starts.shape[0]
@@ -58,8 +58,8 @@ class LabChartDataset:
             channel_blocks.append(raw[start:end])
         
         return channel_blocks
-    
-    
+
+
 
     def get_block(self, indices: list[int] | int) -> dict[np.ndarray]:
         '''
@@ -77,17 +77,28 @@ class LabChartDataset:
             A dictionary of blocks. Each block contains the data for each channel like (n_channel, length_of_block).
         '''
 
+        # If only one block is requested, return block as an array
         if isinstance(indices, int):
-            indices = [indices]
-        
-        data_to_fetch = {}
+            if 0 == indices:
+                raise ValueError('Block indices are 1-based and cannot be 0.')
+            
+            block_data = []
+            for channel in range(self.n_channels):
+                block_data.append(self.data[f'Channel {channel + 1}'][indices - 1])
+            return np.array(block_data)
 
+
+        # If multiple blocks are requested, return a dictionary of blocks
+        if 0 in indices:
+            raise ValueError('Block indices are 1-based and cannot be 0.')
+
+        data_to_fetch = {}
         for block in indices:
             block_data = []
             for channel in range(self.n_channels):
-                block_data.append(self.data[f'Channel {channel + 1}'][block])
+                block_data.append(self.data[f'Channel {channel + 1}'][block - 1])
             
-            data_to_fetch[f'block_block'] = np.array(block_data)
+            data_to_fetch[f'block_{block}'] = np.array(block_data)
         
         return data_to_fetch
     
@@ -132,17 +143,10 @@ class LabChartDataset:
         '''
         Returns the sampling frequency of the data. If sampleiung frequency is constant, returns a float.
         '''
-        fs = self.matlab_dict['fs']
+        fs = self.matlab_dict['samplerate']
 
         if np.all(fs == fs[0]):
             return fs.reshape(-1)[0]
         else:
             return fs
-        
 
-    @property
-    def number_of_channels(self) -> int:
-        '''
-        Returns the number of channels in the dataset.
-        '''
-        return self.n_channels

@@ -235,3 +235,93 @@ class Filter:
         '''
         w, h = freqz(self.b, self.a)
         return w, h
+
+
+class FiringRateConverter:
+    '''
+    Class for converting spike trains to firing rates. To see the equations
+    used to calculate the firing rate, see Dayan, Abbott 2001, pgs. 11-14.
+
+    Parameters
+    ----------
+    fs : int
+        The sampling frequency of the spike train.
+    
+    filter_type : str, {'gaussian', 'exponential', 'boxcar'}, optional
+        The type of filter to use. Default is 'gaussian'.
+    
+    time_constant : float, optional
+        The time constant of the filter. Default is 0.05.
+
+    '''
+
+    def __init__(self, fs: int, filter_type: str = 'gaussian', time_constant: float = 0.05):
+
+        # Input validation
+        if fs <= 0:
+            raise ValueError('Sampling frequency must be greater than 0.')
+        if time_constant <= 0:
+            raise ValueError('Time constant must be greater than 0.')
+        if filter_type not in ['gaussian', 'exponential', 'boxcar']:
+            raise ValueError('Filter type must be either "gaussian", "exponential", or "boxcar".')
+
+
+        self.fs = fs
+        self.filter_type = filter_type
+        self.time_constant = time_constant
+        self._create_filter_kernel()
+    
+    
+    def _build_gaussian_kernel(self) -> np.ndarray:
+        '''
+        Private method for creating the Gaussian filter kernel.
+        '''
+        n = int(self.time_constant * self.fs * 5)
+        t = np.arange(0, n) / self.fs
+        kernel = np.exp((-t**2) / (2 * self.time_constant**2))
+        return kernel / np.sum(kernel)
+
+    
+    def _build_exponential_kernel(self) -> np.ndarray:
+        '''
+        Private method for creating the exponential filter kernel.
+        '''
+        n = int(self.time_constant * self.fs * 5)
+        t = np.arange(0, n) / self.fs
+        kernel = (1 / self.time_constant)**2 * t * np.exp(-t / self.time_constant)
+        return kernel / np.sum(kernel)
+    
+    def _build_boxcar_kernel(self) -> np.ndarray:
+        '''
+        Private method for creating the boxcar filter kernel.
+        '''
+        n = int(self.time_constant * self.fs)
+        kernel = np.ones(n)
+        return kernel / n
+
+    def _create_filter_kernel(self) -> np.ndarray:
+        '''
+        Private method for creating the filter kernel.
+        '''
+        if self.filter_type == 'gaussian':
+            self.kernel = self._build_gaussian_kernel()
+        
+        elif self.filter_type == 'exponential':
+            self.kernel = self._build_exponential_kernel()
+        
+        elif self.filter_type == 'boxcar':
+            self.kernel = self._build_boxcar_kernel()
+        
+
+    def apply(self, spike_train: np.ndarray) -> np.ndarray:
+        '''
+        Applies the filter to the spike train.
+        '''
+
+        if not isinstance(spike_train, np.ndarray):
+            raise TypeError('Input signal must be a numpy array.')
+
+        firing_rate = lfilter(self.kernel, [1], spike_train)
+        return firing_rate * self.fs
+
+

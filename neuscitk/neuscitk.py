@@ -325,3 +325,106 @@ class FiringRateConverter:
         return firing_rate * self.fs
 
 
+class SortedSpikes:
+    '''
+    Object for interacting with the results of running the spike sorter.
+    This object should only be returned by the spike sorter function and is not
+    to be directly created by the user.
+
+    Parameters
+    ----------
+    sort_summary: dict
+        The summary of the spike sorting results. Output of the spike sorter function.
+    '''
+
+    def __init__(self, sort_summary: dict):
+
+        # Load the spike sorting results
+        self.sorted_spikes = {cluster: cluster_data for cluster, cluster_data in sort_summary['clusters'].items()}
+        self.params = sort_summary['parameters']
+        self.pca_embeddings = sort_summary['pca_embeddings']
+        self.pca_var_explained = sort_summary['pca_var_explained']
+        self.labels = sort_summary['cluster_labels']
+
+        self._raw_data = sort_summary['raw_data']
+        self._waveforms = sort_summary['waveforms']
+    
+    
+    def get_cluster_waveoforms(self, cluster: int) -> np.ndarray:
+        '''
+        Retrieves the waveforms for a specific cluster.
+
+        Parameters
+        ----------
+        cluster : int
+            The cluster number to retrieve.
+
+        Returns
+        -------
+        np.ndarray
+            The waveforms for the specified cluster.
+        '''
+        return self.sorted_spikes[cluster]['waveforms']
+
+
+    def get_cluster_spike_times(self, cluster: int) -> np.ndarray:
+        '''
+        Retrieves the spike times for a specific cluster.
+
+        Parameters
+        ----------
+        cluster : int
+            The cluster number to retrieve.
+
+        Returns
+        -------
+        np.ndarray
+            The spike times for the specified cluster.
+        '''
+        return self.sorted_spikes[cluster]['spike_times']
+    
+
+    def plot_clusters(self) -> None:
+        '''
+        Plot all the waveforms colored by cluster, as well as the mean
+        waveform for each cluster.
+        '''
+
+        for idx, (cluster, cluster_data) in enumerate(self.sorted_spikes.items()):
+            waveforms = cluster_data['waveforms']
+            mean_waveform = np.mean(waveforms, axis=0)
+
+            plt.plot(
+                waveforms.T,
+                color = f'C{idx}',
+                alpha = 0.2,
+                label = f'Cluster {cluster}'
+            )
+            plt.plot(
+                mean_waveform,
+                c='black',
+                lw=3
+            )
+        
+        plt.xlabel('time (samples)')
+        plt.ylabel('amplitude (V)')
+        plt.legend()
+        plt.show()
+    
+
+    def plot_pca(self) -> None:
+        '''
+        Plot the PCA embeddings of the waveforms colroed by their cluster
+        '''
+        for cluster_id in np.unique(self.labels):
+            cluster_waveforms = self.pca_embeddings[self.clusters == cluster_id]
+            plt.scatter(
+                cluster_waveforms[:, 0],
+                cluster_waveforms[:, 1],
+                label=f'Cluster {cluster_id}'
+            )
+        
+        plt.xlabel('PC1')
+        plt.ylabel('PC2')
+        plt.legend()
+        plt.show()

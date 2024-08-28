@@ -678,3 +678,72 @@ def sort_spikes(
     sort_summary = _organize_sort_summary(spike_times, waveforms, labels, clustering_scores, pca_embeddings, pca_var_explained)
     
     return SortedSpikes(sort_summary)
+
+
+def time_above_half_max(arr: np.ndarray, fs: int, above_baseline: bool) -> float:
+    '''
+    Compute the time above half max
+
+    Parameters
+    ------------
+    arr : np.ndarray
+        Array to compute time above half max for
+
+    fs : int
+        Sample rate of arr
+    '''
+    if above_baseline:
+        return np.where(arr > arr.max() / 2)[0].size / fs
+    else:
+        return np.where(-arr > -arr.max() / 2)[0].size / fs
+
+
+def area_under_curve(arr: np.ndarray, fs: int, above_baseline: bool) -> float:
+    '''
+    Compute the area under the curve of a waveform
+
+    Parameters
+    ------------
+    arr : np.ndarray
+        Array to compute area under curve for
+
+    fs : int
+        Sample rate of arr
+    '''
+    if above_baseline:
+        return np.trapz(arr, dx=1/fs)
+    else:
+        return np.trapz(-arr, dx=1/fs)
+
+
+def peak_to_peak(arr: np.ndarray) -> float:
+    '''
+    Compute the peak to peak of a waveform
+
+    Parameters
+    ------------
+
+    arr : np.ndarray
+        Array to compute peak to peak for
+    '''
+    return arr.max() - arr.min()
+
+
+def rise_time(arr: np.ndarray, fs: int, threshold: float) -> float:
+    '''
+    Compute the rise time of a waveform
+
+    Parameters
+    ------------
+
+    arr : np.ndarray
+        Array to compute rise time for
+
+    fs : int
+        Sample rate of arr
+
+    threshold : float
+        Threshold amplitude to find start of rise time
+    '''
+    start_time = np.where(arr > threshold)[0][0]
+    return (np.argmax() - start_time) / fs

@@ -391,7 +391,7 @@ class SortedSpikes:
         Plot all the waveforms colored by cluster, as well as the mean
         waveform for each cluster.
         '''
-
+        # Iterate over clusters and plot the waveforms
         for idx, (cluster, cluster_data) in enumerate(self.sorted_spikes.items()):
             waveforms = cluster_data['waveforms']
 
@@ -427,6 +427,8 @@ class SortedSpikes:
         '''
         Plot the PCA embeddings of the waveforms colroed by their cluster
         '''
+
+        # Iterate over clusters and plot the PCA embeddings
         for cluster_id in np.unique(self.labels):
             cluster_waveforms = self.pca_embeddings[self.labels == cluster_id]
             plt.scatter(
@@ -439,6 +441,59 @@ class SortedSpikes:
         plt.ylabel('PC2')
         plt.legend()
         plt.show()
+
+    
+    def hand_pick_clusters(self) -> None:
+        '''
+        Function for handpicking clusters with a lasso selector if
+        you are unhappy with the fit from KMeans
+        '''
+        
+        # Create file paths where we will store temporary data
+        os.mkdir(os.path.join(os.getcwd(), 'temp'))
+        embeddings_path = os.path.join(os.getcwd(), 'temp', 'embeddings.json')
+        waveforms_path = os.path.join(os.getcwd(), 'temp', 'waveforms.json')
+        new_labels_path = os.path.join(os.getcwd(), 'temp', 'new_labels.json')
+
+        # Create tempfiles
+        with open(embeddings_path, 'w') as f:
+            json.dump(self.pca_embeddings.tolist(), f)
+        
+        with open(waveforms_path, 'w') as f:
+            json.dump(self._waveforms.tolist(), f)
+        
+        # Run the hand picking script
+        with importlib.resources.path('neuscitk', 'hand_pick_clusters.py') as path:
+            path = os.path.join(path)
+        
+        # Run script as a subprocess
+        run(
+            [
+                'python',
+                path,
+                embeddings_path,
+                waveforms_path,
+                new_labels_path
+            ],
+            stdout=PIPE,
+            stderr=PIPE,
+            text=True,
+            check=True
+        )
+
+        # Load and return newly chosen clusters
+        with open(new_labels_path, 'r') as f:
+            new_labels = json.load(f)
+        new_labels = np.array(new_labels)
+
+        # Delete temp files
+        os.remove(embeddings_path)
+        os.remove(waveforms_path)
+        os.remove(new_labels_path)
+        os.rmdir(os.path.join(os.getcwd(), 'temp'))
+
+        return new_labels
+
 
 
 def sort_spikes(

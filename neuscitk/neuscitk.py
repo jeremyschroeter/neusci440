@@ -15,6 +15,7 @@ from scipy.io import loadmat
 from scipy import signal
 from scipy.signal import lfilter, butter, filtfilt, dimpulse, find_peaks, freqz
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
@@ -347,10 +348,11 @@ class SortedSpikes:
         self.labels = sort_summary['cluster_labels']
 
         self._raw_data = sort_summary['raw_data']
+        self._spike_times = sort_summary['spike_times']
         self._waveforms = sort_summary['waveforms']
     
     
-    def get_cluster_waveoforms(self, cluster: int) -> np.ndarray:
+    def get_cluster_waveforms(self, cluster: int) -> np.ndarray:
         '''
         Retrieves the waveforms for a specific cluster.
 
@@ -392,14 +394,23 @@ class SortedSpikes:
 
         for idx, (cluster, cluster_data) in enumerate(self.sorted_spikes.items()):
             waveforms = cluster_data['waveforms']
+
             mean_waveform = np.mean(waveforms, axis=0)
 
-            plt.plot(
-                waveforms.T,
-                color = f'C{idx}',
-                alpha = 0.2,
-                label = f'Cluster {cluster}'
-            )
+            for jdx, wav in enumerate(waveforms):
+                if jdx == 0:
+                    plt.plot(
+                        wav,
+                        color = f'C{idx}',
+                        alpha = 0.2,
+                        label = f'Cluster {cluster}'
+                    )
+                else:
+                    plt.plot(
+                        wav,
+                        color = f'C{idx}',
+                        alpha = 0.2
+                    )
             plt.plot(
                 mean_waveform,
                 c='black',
@@ -417,7 +428,7 @@ class SortedSpikes:
         Plot the PCA embeddings of the waveforms colroed by their cluster
         '''
         for cluster_id in np.unique(self.labels):
-            cluster_waveforms = self.pca_embeddings[self.clusters == cluster_id]
+            cluster_waveforms = self.pca_embeddings[self.labels == cluster_id]
             plt.scatter(
                 cluster_waveforms[:, 0],
                 cluster_waveforms[:, 1],
@@ -428,3 +439,173 @@ class SortedSpikes:
         plt.ylabel('PC2')
         plt.legend()
         plt.show()
+
+
+def sort_spikes(
+        arr: np.ndarray,
+        fs: int,
+        lowcut: float = 100,
+        highcut: float = 9000,
+        order: int = 4,
+        ma_window: float = 0.025,
+        threshold_multiplier: float = 4,
+        waveform_window: int = 30,
+        cluster_dimensions: int = 3
+) -> SortedSpikes:
+    '''
+    Function for sorting spikes from raw data.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        The raw data to sort.
+
+    fs : int
+        The sampling frequency of the raw data.
+
+    lowcut : float, optional
+        The lowcut frequency for the bandpass filter. Default is 100.
+
+    highcut : float, optional
+        The highcut frequency for the bandpass filter. Default is 9000.
+
+    order : int, optional
+        The order of the bandpass filter. Default is 4.
+
+    ma_window : float, optional
+        The window size for the moving average filter. Default is 0.025.
+
+    threshold_multiplier : float, optional
+        The multiplier for the threshold used to detect spikes. Default is 4.
+
+    waveform_window : int, optional
+        The window size for extracting waveforms. Default is 30.
+
+    Returns
+    -------
+    SortedSpikes
+        An object containing the spike sorting results.
+    '''
+
+    def _apply_band_pass(arr: np.ndarray) -> np.ndarray:
+        '''
+        Private method for applying the bandpass filter.
+        '''
+        filter = Filter(fs=fs, lowcut=lowcut, highcut=highcut, order=order)
+        return filter.apply(arr)
+    
+    
+    def _moving_average(arr: np.ndarray) -> np.ndarray:
+        '''
+        Private method for applying the moving average filter.
+        '''
+        n = int(fs * ma_window)
+        window = np.ones(n) / n
+        return signal.convolve(arr, window, mode='same')
+    
+    def _moving_std(arr: np.ndarray) -> np.ndarray:
+        '''
+        Private method for applying the moving standard deviation filter.
+        '''
+        ma = _moving_average(arr)
+        ma_sq = _moving_average(arr ** 2)
+        return np.sqrt(ma_sq - ma ** 2)
+    
+    def _detect_spikes(arr: np.ndarray) -> np.ndarray:
+        '''
+        Private method for detecting spikes.
+        '''
+        ma = _moving_average(arr)
+        mstd = _moving_std(arr)
+        threshold = ma + mstd * threshold_multiplier
+        peaks, _ = find_peaks(arr, height=threshold)
+        return peaks
+    
+    def _extract_waveforms(arr: np.ndarray, spike_times: np.ndarray) -> np.ndarray:
+        '''
+        Private method for extracting waveforms.
+        '''
+        waveforms = [arr[spike - waveform_window:spike + waveform_window] for spike in spike_times]
+        return np.vstack(waveforms)
+    
+    def _apply_pca(waveforms: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        '''
+        Private method for applying PCA to the waveforms.
+        '''
+        pca = PCA()
+        scaler = StandardScaler(with_std=False)
+        scaled_waveforms = scaler.fit_transform(waveforms)
+        pca_embeddings = pca.fit_transform(scaled_waveforms)
+        return pca_embeddings, pca.explained_variance_ratio_
+    
+    
+    def _fit_clusters(pca_embeddings: np.ndarray) -> np.ndarray:
+        '''
+        Private method for fitting the clusters. Uses the silhouette score to determine the best number of clusters.
+        '''
+        
+        embeddings = pca_embeddings[:, :cluster_dimensions]
+
+        scores = []
+        cluster_range = range(2, 11)
+        for n_clusters in cluster_range:
+            kmeans = KMeans(n_clusters).fit(embeddings)
+            labels = kmeans.labels_
+            scores.append(silhouette_score(embeddings, labels))
+        
+        best_cluster_number = cluster_range[np.argmax(scores)]
+        kmeans = KMeans(best_cluster_number).fit(embeddings)
+        
+        return kmeans.labels_, scores
+    
+
+    def _organize_sort_summary(
+            spike_times: np.ndarray,
+            waveforms: np.ndarray,
+            labels: np.ndarray,
+            clustering_scores: np.ndarray,
+            pca_embeddings: np.ndarray,
+            pca_var_explained: np.ndarray
+    ) -> dict:
+        
+        sort_summary = {}
+
+        sort_summary['clusters'] = {
+            cluster : {
+                'spike_times' : spike_times[labels == cluster],
+                'waveforms' : waveforms[labels == cluster]
+            }
+            for cluster in np.unique(labels)
+        }
+
+        sort_summary['parameters'] = {
+            'fs' : fs,
+            'lowcut' : lowcut,
+            'highcut' : highcut,
+            'order' : order,
+            'ma_window' : ma_window,
+            'threshold_multiplier' : threshold_multiplier,
+            'waveform_window' : waveform_window,
+            'cluster_dimensions' : cluster_dimensions
+        }
+
+        sort_summary['cluster_labels'] = labels
+        sort_summary['clustering_scores'] = clustering_scores
+        sort_summary['pca_embeddings'] = pca_embeddings
+        sort_summary['pca_var_explained'] = pca_var_explained
+        sort_summary['raw_data'] = arr
+        sort_summary['waveforms'] = waveforms
+        sort_summary['spike_times'] = spike_times
+
+        return sort_summary
+    
+
+    # Apply bandpass filter
+    bandpassed = _apply_band_pass(arr)
+    spike_times = _detect_spikes(bandpassed)
+    waveforms = _extract_waveforms(arr, spike_times)
+    pca_embeddings, pca_var_explained = _apply_pca(waveforms)
+    labels, clustering_scores = _fit_clusters(pca_embeddings)
+    sort_summary = _organize_sort_summary(spike_times, waveforms, labels, clustering_scores, pca_embeddings, pca_var_explained)
+    
+    return SortedSpikes(sort_summary)

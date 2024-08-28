@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from subprocess import PIPE, run
 from scipy.io import loadmat
 from scipy import signal
-from scipy.signal import lfilter, butter, filtfilt, dimpulse, find_peaks
+from scipy.signal import lfilter, butter, filtfilt, dimpulse, find_peaks, freqz
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
@@ -150,3 +150,88 @@ class LabChartDataset:
         else:
             return fs
 
+class Filter:
+    '''
+    Class for applying low-, high-, and band-pass filters to 1d signals.
+
+    Parameters
+    ----------
+    fs: int
+        The sampling frequency of the signal.
+
+    lowcut : float | None, optional
+        Lowcut frequency for a high or band pass filter. Leave as none
+        if implementing low pass. Default is None.
+
+    highcut : float | None, optional
+        Highcut frequency for a low or band pass filter. Leave as none
+        if implementing high pass. Default is None.
+
+    order : int, optional
+        The order of the filter. Default is 4.
+    '''
+
+    def __init__(
+            self,
+            fs: int,
+            lowcut: float | None = None,
+            highcut: float | None = None,
+            order: int = 4
+    ) -> None:
+        
+        if lowcut is not None and highcut is not None:
+            if lowcut > highcut:
+                raise ValueError('Lowcut frequency cannot be greater than highcut frequency.')
+            if highcut < lowcut:
+                raise ValueError('Highcut frequency cannot be less than lowcut frequency.')
+            
+            self.lowcut = lowcut
+            self.highcut = highcut
+            self.b, self.a = butter(N=order, Wn=[lowcut, highcut], btype='bandpass', fs=fs)
+        
+        elif lowcut is not None and highcut is None:
+            self.lowcut = lowcut
+            self.b, self.a = butter(N=order, Wn=lowcut, btype='highpass', fs=fs)
+        
+        elif lowcut is None and highcut is not None:
+            self.highcut = highcut
+            self.b, self.a = butter(N=order, Wn=highcut, btype='lowpass', fs=fs)
+        
+        else:
+            raise ValueError('Either lowcut or highcut frequency must be specified.')
+        
+    def apply(self, arr: np.ndarray) -> np.ndarray:
+        '''
+        Applies the filter to the input signal.
+        
+        Parameters
+        ----------
+        arr : np.ndarray
+            The input signal to filter.
+
+        Returns
+        -------
+        np.ndarray
+            The filtered signal.
+        '''
+        if not isinstance(arr, np.ndarray):
+            raise TypeError('Input signal must be a numpy array.')
+    
+        return filtfilt(self.b, self.a, arr)
+    
+    @property
+    def impulse_response(self) -> np.ndarray:
+        '''
+        The impulse response of the filter.
+        '''
+        system = (self.b, self.a, 1)
+        _, h = dimpulse(system, n=100)
+        return h[0].flatten()
+    
+    @property
+    def frequency_response(self) -> tuple[np.ndarray]:
+        '''
+        The frequency response of the filter.
+        '''
+        w, h = freqz(self.b, self.a)
+        return w, h

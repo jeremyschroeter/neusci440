@@ -443,6 +443,19 @@ class SortedSpikes:
         plt.show()
 
     
+    def _regorganize_clusters(self, new_labels: np.ndarray) -> None:
+        '''
+        Private method for reorganizing clusters based on new labels.
+        '''
+        self.sorted_spikes = {}
+        for idx, cluster in enumerate(np.unique(new_labels)):
+            self.sorted_spikes[cluster] = {
+                'spike_times' : self._spike_times[new_labels == cluster],
+                'waveforms' : self._waveforms[new_labels == cluster]
+            }
+        self.labels = new_labels
+
+
     def hand_pick_clusters(self) -> None:
         '''
         Function for handpicking clusters with a lasso selector if
@@ -492,7 +505,8 @@ class SortedSpikes:
         os.remove(new_labels_path)
         os.rmdir(os.path.join(os.getcwd(), 'temp'))
 
-        return new_labels
+        # Change state to reflect newly selected clusters
+        self._regorganize_clusters(new_labels)
 
 
 

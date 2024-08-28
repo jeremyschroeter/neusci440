@@ -11,8 +11,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.widgets import LassoSelector
 from matplotlib.path import Path
+from itertools import cycle
+
 
 matplotlib.use('TkAgg')
+color_cycle = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
 
 def main():
     def onselect(verts):
@@ -25,7 +28,7 @@ def main():
             main_scatter.set_offsets(clusters[current_mask])
 
             # Create a new scatter plot for the selected points
-            color = np.random.rand(3,)
+            color = next(color_cycle)
             new_scatter = ax1.scatter(clusters[indices, 0], clusters[indices, 1], c=[color], label=f'Cluster {current_cluster[0]}')
             scatter_plots.append(new_scatter)
 

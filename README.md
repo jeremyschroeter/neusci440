@@ -1,2 +1,2 @@
-# neusci440
-Course materials and python package for the neusci440 course at UW
+# NEUSCI 440
+Course materials and python package for the NEUSCI440 course at UW. NEUSCI 440 is a companion course to the NEUSCI 30x sequence. The course focuses on training students to analyze the electrophysiological data they collect in labs with the Python programming language, as well as exposing them to common data analytic techniques for neural data.

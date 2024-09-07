@@ -86,6 +86,8 @@ class LabChartDataset:
             block_data = []
             for channel in range(self.n_channels):
                 block_data.append(self.data[f'Channel {channel + 1}'][indices - 1])
+            if self.n_channels == 1:
+                return np.array(block_data)[0]
             return np.array(block_data)
 
 
@@ -137,6 +139,25 @@ class LabChartDataset:
         '''
 
         return self.pages[page_name]
+    
+
+    def concat_blocks(self, blocks: list[int]) -> np.ndarray:
+        '''
+        Concatenates blocks of data.
+        
+        Parameters
+        ----------
+        blocks : list[int]
+            The blocks to concatenate.
+            
+        Returns
+        -------
+        np.ndarray
+            The concatenated data.
+        '''
+
+        blocks = self.get_block(blocks)
+        return np.hstack([block for block in blocks.values()])
 
 
     @property
@@ -680,24 +701,6 @@ def sort_spikes(
     return SortedSpikes(sort_summary)
 
 
-def time_above_half_max(arr: np.ndarray, fs: int, above_baseline: bool) -> float:
-    '''
-    Compute the time above half max
-
-    Parameters
-    ------------
-    arr : np.ndarray
-        Array to compute time above half max for
-
-    fs : int
-        Sample rate of arr
-    '''
-    if above_baseline:
-        return np.where(arr > arr.max() / 2)[0].size / fs
-    else:
-        return np.where(-arr > -arr.max() / 2)[0].size / fs
-
-
 def area_under_curve(arr: np.ndarray, fs: int, above_baseline: bool) -> float:
     '''
     Compute the area under the curve of a waveform
@@ -711,14 +714,16 @@ def area_under_curve(arr: np.ndarray, fs: int, above_baseline: bool) -> float:
         Sample rate of arr
     '''
     if above_baseline:
+        arr = arr[arr > 0]
         return np.trapz(arr, dx=1/fs)
     else:
+        arr = arr[arr < 0]
         return np.trapz(-arr, dx=1/fs)
 
 
-def peak_to_peak(arr: np.ndarray) -> float:
+def peak_to_peak_amplitude(arr: np.ndarray) -> float:
     '''
-    Compute the peak to peak of a waveform
+    Compute the peak to peak amplitude of a waveform
 
     Parameters
     ------------
@@ -729,7 +734,26 @@ def peak_to_peak(arr: np.ndarray) -> float:
     return arr.max() - arr.min()
 
 
-def rise_time(arr: np.ndarray, fs: int, threshold: float) -> float:
+def peak_to_peak_time(arr: np.ndarray, fs: int) -> float:
+    '''
+    Compute the peak to peak time of a waveform
+
+    Parameters
+    ------------
+
+    arr : np.ndarray
+        Array to compute peak to peak time for
+
+    fs : int
+        Sample rate of arr
+    '''
+    peak_idx = np.argmax(arr)
+    trough_idx = np.argmin(arr)
+
+    return (trough_idx - peak_idx) / fs
+
+
+def rise_time(arr: np.ndarray, fs: int, threshold_fraction: float) -> float:
     '''
     Compute the rise time of a waveform
 
@@ -742,8 +766,43 @@ def rise_time(arr: np.ndarray, fs: int, threshold: float) -> float:
     fs : int
         Sample rate of arr
 
-    threshold : float
-        Threshold amplitude to find start of rise time
+    threshold_fraction: float
+        Fraction of the peak amplitude to use as the threshold
     '''
-    start_time = np.where(arr > threshold)[0][0]
-    return (np.argmax() - start_time) / fs
+    peak_value = arr.min()
+    threshold = peak_value * threshold_fraction
+    
+    rise_idx = np.where(arr < threshold)[0][0]
+    peak_idx = np.argmin(arr)
+
+    return (peak_idx - rise_idx) / fs
+
+
+def compute_width_at_half_max(arr: np.ndarray, fs: int) -> float:
+    '''
+    Compute the width at half max of a waveform
+
+    Parameters
+    ------------
+
+    arr : np.ndarray
+        Array to compute width at half max for
+
+    fs : int
+        Sample rate of arr
+    '''
+    half_max = arr.min() / 2
+    half_max_idx = np.where(arr > half_max)[0]
+
+    return (half_max_idx[-1] - half_max_idx[0]) / fs
+
+
+def compute_waveform_chartacteristics(neural_data: SortedSpikes, fs: int) -> dict:
+    '''
+    Function for computing waveform characteristics. This function computes the following characteristics:
+    - Peak amplitude
+    - Time above half max
+    - Area under the curve
+    - Peak to peak
+    - Rise time
+    - '''

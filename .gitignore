@@ -1,0 +1,8 @@
+# Ignore distribution directories
+dist/
+
+# Ignore egg-info directories
+*.egg-info/
+
+# Ignore __pycache__ directories
+__pycache__/

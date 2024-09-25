@@ -5,6 +5,7 @@ Written for Python 3.12.4
 '''
 
 import os
+os.environ['OMP_NUM_THREADS'] = '1'
 import errno
 import json
 import importlib
@@ -362,7 +363,7 @@ class SortedSpikes:
     def __init__(self, sort_summary: dict):
 
         # Load the spike sorting results
-        self.sorted_spikes = {cluster: cluster_data for cluster, cluster_data in sort_summary['clusters'].items()}
+        self.sorted_spikes = {cluster+1: cluster_data for cluster, cluster_data in sort_summary['clusters'].items()}
         self.params = sort_summary['parameters']
         self.pca_embeddings = sort_summary['pca_embeddings']
         self.pca_var_explained = sort_summary['pca_var_explained']
@@ -405,6 +406,25 @@ class SortedSpikes:
             The spike times for the specified cluster.
         '''
         return self.sorted_spikes[cluster]['spike_times']
+    
+    def get_spike_train(self, cluster: int) -> np.ndarray:
+        '''
+        Retrieves the spike train for a specific cluster.
+        
+        Parameters
+        ----------
+        cluster : int
+            The cluster number to retrieve.
+            
+        Returns
+        -------
+        np.ndarray
+            The spike train for the specified cluster.
+        '''
+        spike_train = np.zeros_like(self._raw_data)
+        cluster_spike_times = self.sorted_spikes[cluster]['spike_times']
+        spike_train[cluster_spike_times] = 1
+        return spike_train
     
 
     def plot_clusters(self) -> None:
@@ -464,6 +484,41 @@ class SortedSpikes:
         plt.show()
 
     
+    def shift_clusters(self, cluster: int, shift: int) -> None:
+        '''
+        Shifts the spikes times of a cluster by a specific amount
+        
+        Parameters
+        ----------
+        cluster : int
+            The cluster to shift.
+            
+        shift : int
+            The number of timepoints to shift the spikes by.
+        '''
+        self.sorted_spikes[cluster]['spike_times'] -= shift
+
+        window_size = self.params['waveform_window']
+        new_waveforms = []
+
+        for spike in self.sorted_spikes[cluster]['spike_times']:
+            new_waveforms.append(self._raw_data[spike - window_size:spike + window_size])
+
+        self.sorted_spikes[cluster]['waveforms'] = np.vstack(new_waveforms)
+        self._waveforms = np.vstack([self.sorted_spikes[cluster]['waveforms'] for cluster in self.sorted_spikes.keys()])
+        self._spike_times = np.hstack([self.sorted_spikes[cluster]['spike_times'] for cluster in self.sorted_spikes.keys()])
+
+        # Remove duplicate rows from waveforms and duplicate elements from spike times
+        unique_waveforms, unique_indices = np.unique(self._waveforms, axis=0, return_index=True)
+        self._waveforms = unique_waveforms
+        self._spike_times = self._spike_times[unique_indices]
+
+
+        new_embeddings = PCA().fit_transform(self._waveforms)
+        self.pca_embeddings = new_embeddings
+        self.hand_pick_clusters()
+
+    
     def _regorganize_clusters(self, new_labels: np.ndarray) -> None:
         '''
         Private method for reorganizing clusters based on new labels.
@@ -475,6 +530,7 @@ class SortedSpikes:
                 'waveforms' : self._waveforms[new_labels == cluster]
             }
         self.labels = new_labels
+        self._spike_times 
 
 
     def hand_pick_clusters(self) -> None:

@@ -13,8 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from subprocess import PIPE, run
 from scipy.io import loadmat
-from scipy import signal
-from scipy.signal import lfilter, butter, filtfilt, dimpulse, find_peaks, freqz
+from scipy.signal import lfilter, butter, filtfilt, dimpulse, find_peaks, freqz, convolve
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
@@ -429,9 +428,25 @@ class SortedSpikes:
 
     def plot_clusters(self) -> None:
         '''
-        Plot all the waveforms colored by cluster, as well as the mean
-        waveform for each cluster.
+        Plot all waveforms colored by cluster, and their position in PC space
         '''
+
+        fig = plt.figure(figsize=(10, 5))
+        pca_ax = fig.add_subplot(121)
+        wf_ax = fig.add_subplot(122)
+
+        for cluster_id in np.unique(self.labels):
+            cluster_waveforms = self.pca_embeddings[self.labels == cluster_id]
+            pca_ax.scatter(
+                cluster_waveforms[:, 0],
+                cluster_waveforms[:, 1],
+                label=f'Cluster {cluster_id}'
+            )
+        
+        pca_ax.set_xlabel('PC1')
+        pca_ax.set_ylabel('PC2')
+        pca_ax.legend()
+
         # Iterate over clusters and plot the waveforms
         for idx, (cluster, cluster_data) in enumerate(self.sorted_spikes.items()):
             waveforms = cluster_data['waveforms']
@@ -440,48 +455,30 @@ class SortedSpikes:
 
             for jdx, wav in enumerate(waveforms):
                 if jdx == 0:
-                    plt.plot(
+                    wf_ax.plot(
                         wav,
                         color = f'C{idx}',
                         alpha = 0.2,
                         label = f'Cluster {cluster}'
                     )
                 else:
-                    plt.plot(
+                    wf_ax.plot(
                         wav,
                         color = f'C{idx}',
                         alpha = 0.2
                     )
-            plt.plot(
+            wf_ax.plot(
                 mean_waveform,
                 c='black',
                 lw=3
             )
         
-        plt.xlabel('time (samples)')
-        plt.ylabel('amplitude (V)')
-        plt.legend()
+        wf_ax.set_xlabel('time (samples)')
+        wf_ax.set_ylabel('amplitude (V)')
+        wf_ax.legend()
+        fig.tight_layout()
         plt.show()
-    
 
-    def plot_pca(self) -> None:
-        '''
-        Plot the PCA embeddings of the waveforms colroed by their cluster
-        '''
-
-        # Iterate over clusters and plot the PCA embeddings
-        for cluster_id in np.unique(self.labels):
-            cluster_waveforms = self.pca_embeddings[self.labels == cluster_id]
-            plt.scatter(
-                cluster_waveforms[:, 0],
-                cluster_waveforms[:, 1],
-                label=f'Cluster {cluster_id}'
-            )
-        
-        plt.xlabel('PC1')
-        plt.ylabel('PC2')
-        plt.legend()
-        plt.show()
 
     
     def shift_clusters(self, cluster: int, shift: int) -> None:
@@ -586,6 +583,181 @@ class SortedSpikes:
         self._regorganize_clusters(new_labels)
 
 
+def apply_band_pass(
+        arr: np.ndarray,
+        fs: int,
+        lowcut: float,
+        highcut: float,
+        order: int = 4
+) -> np.ndarray:
+    return Filter(fs=fs, lowcut=lowcut, highcut=highcut, order=order).apply(arr)
+
+
+def moving_average(arr: np.ndarray, fs: int, window_size: float) -> np.ndarray:
+    '''
+    Calculate the moving average of an array
+
+    Parameters
+    ------------
+    arr : np.ndarray
+        The array to calculate the moving average of
+
+    fs : int
+        The sample rate of the array
+
+    window_size : float
+        The size of the window to use for the moving average
+
+    Returns
+    ------------
+    np.ndarray
+        The moving average of the input array
+    '''
+    n = int(fs * window_size)
+    window = np.ones(n) / n
+    return convolve(arr, window, mode='same')
+
+
+def moving_std(arr: np.ndarray, fs: int, window_size: float) -> np.ndarray:
+    '''
+    Calculate the moving standard deviation of an array
+
+    Parameters
+    ------------
+    arr : np.ndarray
+        The array to calculate the moving standard deviation of
+
+    fs : int
+        The sample rate of the array
+
+    window_size : float
+        The size of the window to use for the moving standard deviation
+
+    Returns
+    ------------
+    np.ndarray
+        The moving standard deviation of the input array
+    '''
+    ma = moving_average(arr, fs, window_size)
+    ma_sq = moving_average(arr ** 2)
+    return np.sqrt(ma_sq - ma**2)
+
+def detect_spikes(arr: np.ndarray, fs: int, window_size: int, multiplier: float = 4):
+    '''
+    Detect spikes in an array using an adaptive threshold
+
+    Parameters
+    ------------
+    arr : np.ndarray
+        The array to detect spikes in
+
+    fs : int
+        The sample rate of the array
+
+    window_size : int
+        The size of the window to use for the moving average and standard deviation
+
+    multiplier : float
+        The multiplier to use for the threshold
+
+    Returns
+    ------------
+    np.ndarray
+        The indices of the spikes in the input array
+    '''
+    ma = moving_average(arr, fs, window_size)
+    mstd = moving_std(arr, fs, window_size)
+    threshold = ma + mstd * multiplier
+    peaks, _ = find_peaks(arr, height=threshold)
+    return peaks
+
+
+def extract_waveforms(arr: np.ndarray, fs: int, window_size: int, ma_window: float = 0.025, threshold_multiplier: float = 4) -> np.ndarray:
+    '''
+    Extract spike waveforms from an array
+    
+    Parameters
+    ------------
+    arr : np.ndarray
+        The array to extract waveforms from
+
+    fs : int
+        The sample rate of the array
+
+    window_size : int
+        The size of the window to use for the waveforms
+
+    ma_window : float
+        The size of the window to use for the moving average
+
+    threshold_multiplier : float
+        The standard deviation multiplier to use for the threshold
+
+    Returns
+    ------------
+    np.ndarray
+        The extracted waveforms
+    '''
+    spike_times = detect_spikes(arr, fs, ma_window, threshold_multiplier)
+    waveforms = [arr[spike - window_size // 2 : 1 + spike + window_size // 2] for spike in spike_times]
+    return np.vstack(waveforms)
+
+
+def compare_clusters(group_1: SortedSpikes, group_2: SortedSpikes) -> tuple[np.ndarray, np.ndarray]:
+    '''
+    maps the waveforms from group_2 into the PCA space of group_1
+
+    Parameters
+    ------------
+    group_1 : SortedSpikes
+        the group of spikes we will use to define our PCA space, output of ntk.sort_spikes
+    
+    group_2 : SortedSpikes
+        the group of spikes we want to map into group_1s PCA space
+    '''
+
+    pca = PCA().fit(group_1._waveforms)
+    group_1_transformed = pca.transform(group_1._waveforms)
+    group_2_transformed = pca.transform(group_2._waveforms)
+
+    group_1_labels = group_1.labels
+    group_2_labels = group_2.labels
+
+    fig = plt.figure(figsize=(8, 8))
+    counter = 0
+    for idx, cluster in enumerate(np.unique(group_1_labels)):
+        mask = group_1_labels == cluster
+        plt.scatter(
+            group_1_transformed[mask, 0],
+            group_1_transformed[mask, 1],
+            c=f'C{counter}',
+            edgecolors='black',
+            linewidths=0.5,
+            label=f'Group 1 cluster {cluster}'
+        )
+        counter += 1
+    
+    for idx, cluster in enumerate(np.unique(group_2_labels)):
+        mask = group_2_labels == cluster
+        plt.scatter(
+            group_2_transformed[mask, 0],
+            group_2_transformed[mask, 1],
+            c=f'C{counter}',
+            edgecolors='black',
+            linewidths=0.5,
+            marker='X',
+            label=f'Group 2 cluster {cluster}'
+        )
+        counter += 1
+    plt.xlabel('Group 1 PC1')
+    plt.ylabel('Group 2 PC2')
+    plt.legend()
+    plt.show()
+        
+
+
+
+
 
 def sort_spikes(
         arr: np.ndarray,
@@ -647,7 +819,7 @@ def sort_spikes(
         '''
         n = int(fs * ma_window)
         window = np.ones(n) / n
-        return signal.convolve(arr, window, mode='same')
+        return convolve(arr, window, mode='same')
     
     def _moving_std(arr: np.ndarray) -> np.ndarray:
         '''
@@ -851,14 +1023,3 @@ def compute_width_at_half_max(arr: np.ndarray, fs: int) -> float:
     half_max_idx = np.where(arr > half_max)[0]
 
     return (half_max_idx[-1] - half_max_idx[0]) / fs
-
-
-def compute_waveform_chartacteristics(neural_data: SortedSpikes, fs: int) -> dict:
-    '''
-    Function for computing waveform characteristics. This function computes the following characteristics:
-    - Peak amplitude
-    - Time above half max
-    - Area under the curve
-    - Peak to peak
-    - Rise time
-    - '''

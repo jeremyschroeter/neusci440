@@ -5,7 +5,7 @@ with open('Readme.md', 'r') as f:
 
 setup(
     name='neuscitk',
-    version='1.1.0',
+    version='1.1.3',
     description='Toolkit for companion course to UW Neusci 30x courses',
     long_description=read_me,
     long_description_content_type='text/markdown',

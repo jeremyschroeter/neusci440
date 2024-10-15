@@ -953,7 +953,7 @@ def spike_triggered_average(
     np.ndarray
         The stimulus before all spikes. Shape is (n_spikes, window_before + window_after)
     '''
-    sta = np.zeros((len(spike_times), window_before))
+    sta = np.zeros((len(spike_times, window_before)))
     for idx, spike in enumerate(spike_times):
         sta[idx] = stimulus[spike - window_before: spike + window_after]
     return sta

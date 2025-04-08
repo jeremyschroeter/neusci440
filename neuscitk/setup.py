@@ -5,7 +5,7 @@ with open('Readme.md', 'r') as f:
 
 setup(
     name='neuscitk',
-    version='1.1.5',
+    version='1.2.1',
     description='Toolkit for companion course to UW Neusci 30x courses',
     long_description=read_me,
     long_description_content_type='text/markdown',
@@ -17,6 +17,8 @@ setup(
         'numpy',
         'scipy',
         'scikit-learn',
-        'matplotlib'
+        'matplotlib',
+        'spikeinterface[full]',
+        'tridesclous'
     ]
 )

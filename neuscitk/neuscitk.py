@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy.io import loadmat
-from scipy.signal import find_peaks, butter, filtfilt
+from scipy.signal import find_peaks, butter, filtfilt, fftconvolve
 
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
@@ -35,6 +35,7 @@ class LabChartDataset:
         
         self.matlab_dict = loadmat(file_name=file_path)
         self.n_channels = len(self.matlab_dict['titles'])
+        self.n_blocks = len(self.matlab_dict['datastart'][0]) # each block has the same number of channels
         
         self.data = {f'Channel {ch + 1}' : self._split_blocks(ch) for ch in range(self.n_channels)}
 
@@ -155,9 +156,28 @@ class LabChartDataset:
 
 
     @property
+    def comments(self) -> dict:
+        '''
+        Returns and formats comment data
+        '''
+        comment_data = np.array(self.matlab_dict['com'], dtype=int)
+        comment_text = self.matlab_dict['comtext']
+
+        block_keys = np.unique(comment_data[:, 1]) - 1
+        vals = [[[] for channel in range(self.n_channels)] for block in range(self.n_blocks)] ## array of empty lists shape = (nblocks, n channels)
+        for comment in comment_data:
+            block_num = comment[1]-1 ##adicht uses one based indexing, ntk uses zero based indexing
+            channel_num = comment[0]-1
+            pos_text = (comment[2], comment_text[comment[4]-1]) ## (sample number, comment text)
+            vals[block_num][channel_num].append(pos_text)
+
+        comment_dict = {f'block_{block}' : comments for block, comments in zip(block_keys, vals)} # should keep block nomenclature consistent
+        return comment_dict
+        
+    @property
     def fs(self) -> float | np.ndarray:
         '''
-        Returns the sampling frequency of the data. If sampleiung frequency is constant, returns a float.
+        Returns the sampling frequency of the data. If sampling frequency is constant, returns a float.
         '''
         fs = self.matlab_dict['samplerate']
 
@@ -327,6 +347,49 @@ def detect_spikes(
             
     return np.stack(waveforms), np.array(valid_spike_times)
 
+def approx_firing_rate(
+        signal: np.ndarray,
+        threshold: np.ndarray,
+        fs: int,
+        sigma: float = 0.1
+
+) -> np.ndarray:
+    '''
+    Computes an approximate firing rate
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        1D array of signal
+
+    threshold : float
+        threshold above which to detect spikes
+    
+    fs : int
+        sampling rate of the signal
+
+    sigma : float
+        temporal resolution of kernel
+
+    Returns
+    ----------
+    np.ndarray
+        array of the approximate firing rate at each time in the signal
+
+    '''
+
+    g_kernel = lambda x: np.exp(-x**2/(2*sigma**2))/(sigma*np.sqrt(2*np.pi)) # smooth with a gaussian kernel
+    x = np.linspace(-10, 10, int(20*fs)) 
+
+    times, _ = find_peaks(-signal, height=threshold, distance=int(0.001 * fs))
+    dense_times = np.zeros(len(signal))
+    for time in times:
+        dense_times[time] = 1
+
+    smoothed_fr = fftconvolve(dense_times, g_kernel(x), mode='same') # units work out to sp/sec b/c integral=1
+
+    return smoothed_fr
+
 
 def apply_PCA(
         X: np.ndarray,
@@ -414,4 +477,3 @@ def sort_spikes(
     }
 
     return SortedSpikes(sort_summary)
-
